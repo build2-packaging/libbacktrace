@@ -2,24 +2,169 @@ intf_libs = # Interface dependencies.
 impl_libs = # Implementation dependencies.
 #import xxxx_libs += libhello%lib{hello}
 
-lib{backtrace}: {h c}{**} $impl_libs $intf_libs
+# Platform detection driving source selection.
+#
+target_windows = ($c.target.class == 'windows')
+target_macos   = ($c.target.class == 'macos')
+target_linux   = ($c.target.class == 'linux')
+target_bsd     = ($c.target.class == 'bsd')
+target_elf     = ($target_linux || $target_bsd)
+
+gcc_or_clang = ($c.class == 'gcc')
+
+# backtrace.c/simple.c need the Itanium C++ ABI unwind API (unwind.h),
+# provided by GCC's and Clang's runtime. Other compilers get the no-op
+# nounwind.c instead (matches upstream's unwind.h/_Unwind_Backtrace check).
+#
+have_unwind = $gcc_or_clang
+
+# mmap-based file views and allocation are used on all POSIX targets.
+# Windows falls back to read()/malloc() (matches upstream's mmap check).
+#
+have_mmap = (!$target_windows)
+
+lib{backtrace}: h{** -backtrace-supported -config/config} \
+  c{** -backtrace -simple -nounwind        \
+       -elf -macho -pecoff -xcoff -unknown \
+       -read -mmapio -alloc -mmap}         \
+  $impl_libs $intf_libs
+
+# Unwind-based backtrace collection (see have_unwind above).
+#
+lib{backtrace}: c{backtrace simple}: include = $have_unwind
+lib{backtrace}: c{nounwind}:         include = (!$have_unwind)
+
+# Executable/shared object format backend: exactly one per target.
+# AIX/XCOFF is not currently supported by this package.
+#
+lib{backtrace}: c{elf}:     include = $target_elf
+lib{backtrace}: c{macho}:   include = $target_macos
+lib{backtrace}: c{pecoff}:  include = $target_windows
+lib{backtrace}: c{xcoff}:   include = false
+lib{backtrace}: c{unknown}: include = (!$target_elf && !$target_macos && !$target_windows)
+
+# File view and allocation strategy (see have_mmap above).
+#
+lib{backtrace}: c{read alloc}:  include = (!$have_mmap)
+lib{backtrace}: c{mmapio mmap}: include = $have_mmap
+
+# Generate the public backtrace-supported.h from upstream's own template.
+# The values mirror what upstream's configure script computes for the
+# platform/format combinations selected above.
+#
+backtrace_supported     = ($target_elf || $target_macos || $target_windows)
+backtrace_supports_data = (!$target_windows)
+backtrace_uses_malloc   = (!$have_mmap)
+
+[rule_hint=in] h{backtrace-supported}: in{backtrace-supported}
+{
+  in.symbol = '@'
+  in.mode   = lax
+
+  BACKTRACE_SUPPORTED        = ($backtrace_supported     ? 1 : 0)
+  BACKTRACE_USES_MALLOC      = ($backtrace_uses_malloc   ? 1 : 0)
+  BACKTRACE_SUPPORTS_THREADS = ($gcc_or_clang            ? 1 : 0)
+  BACKTRACE_SUPPORTS_DATA    = ($backtrace_supports_data ? 1 : 0)
+}
+
+lib{backtrace}: h{backtrace-supported}
+
+# Generate the private config.h from upstream's autoheader template.
+#
+# The HAVE_* and BACKTRACE_*_SIZE values come from the builtin autoconf
+# checks and the project checks in build/autoconf/checks/, with upstream's
+# names mapped to the canonical or project-specific check names.
+#
+# Only this library's sources include config.h, so it is generated in the
+# private config/ subdirectory next to its template. That subdirectory is
+# searched by the build options below but is not part of the exported search
+# paths and is not installed.
+#
+using autoconf
+
+# 64-bit off_t is selectable on glibc (already the default on 64-bit
+# targets) and MinGW, and upstream's configure selects it there
+# (AC_SYS_LARGEFILE).
+#
+large_files = ($c.stdlib == 'glibc' || $c.target.system == 'mingw32')
+
+config/h{config}: config/in{config}
+{
+  autoconf.aliases  = HAVE_DECL_GETPAGESIZE@HAVE_GETPAGESIZE \
+                      HAVE_DECL_STRNLEN@HAVE_STRNLEN         \
+                      HAVE_DECL__PGMPTR@HAVE__PGMPTR         \
+                      HAVE_GETIPINFO@HAVE__UNWIND_GETIPINFO
+  autoconf.aliases += HAVE_ATOMIC_FUNCTIONS@HAVE_LIBBACKTRACE_ATOMIC_FUNCTIONS \
+                      HAVE_SYNC_FUNCTIONS@HAVE_LIBBACKTRACE_SYNC_FUNCTIONS     \
+                      HAVE_KERN_PROC@HAVE_LIBBACKTRACE_KERN_PROC               \
+                      HAVE_KERN_PROC_ARGS@HAVE_LIBBACKTRACE_KERN_PROC_ARGS
+
+  # System extensions (AC_USE_SYSTEM_EXTENSIONS). The last three are only
+  # defined on Minix.
+  #
+  autoconf.substitutions  = _ALL_SOURCE@true _GNU_SOURCE@true \
+                            _POSIX_PTHREAD_SEMANTICS@true     \
+                            _TANDEM_SOURCE@true __EXTENSIONS__@true
+  autoconf.substitutions += _MINIX@false _POSIX_1_SOURCE@false \
+                            _POSIX_SOURCE@false
+
+  # Large file support (AC_SYS_LARGEFILE). _LARGE_FILES is only used on AIX.
+  #
+  autoconf.substitutions += _FILE_OFFSET_BITS@($large_files ? 64 : false) \
+                            _LARGE_FILES@false
+
+  # Libraries that only upstream's tests use and this package does not link.
+  #
+  HAVE_LIBLZMA = false
+  HAVE_ZLIB    = false
+  HAVE_ZSTD    = false
+
+  # Autoconf and libtool metadata that the source code does not use.
+  #
+  LT_OBJDIR         = false
+  PACKAGE_BUGREPORT = false
+  PACKAGE_NAME      = false
+  PACKAGE_STRING    = false
+  PACKAGE_TARNAME   = false
+  PACKAGE_URL       = false
+  PACKAGE_VERSION   = false
+}
+
+lib{backtrace}: config/h{config}
 
 # Build options.
 #
 out_pfx = [dir_path] $out_root/libbacktrace/
 src_pfx = [dir_path] $src_root/libbacktrace/
+out_cfg = [dir_path] $out_pfx/config/
 
-c.poptions =+ "-I$out_pfx" "-I$src_pfx"
+c.poptions =+ "-I$out_cfg" "-I$out_pfx" "-I$src_pfx"
+
+# The checks in config.h include system headers (<features.h> on glibc,
+# <_mingw.h> on MinGW) before its feature test macros, which then come too
+# late for these headers. So also define the ones that affect them here.
+#
+c.poptions += -D_GNU_SOURCE
+
+if $large_files
+  c.poptions += -D_FILE_OFFSET_BITS=64
 
 #obja{*}: c.poptions += -DLIBBACKTRACE_STATIC_BUILD
 #objs{*}: c.poptions += -DLIBBACKTRACE_SHARED_BUILD
 
 # Export options.
 #
+# Export both the qualified and the unqualified search paths, also in the
+# generated pkg-config file, so consumers may include either
+# <libbacktrace/backtrace.h> or upstream's <backtrace.h>. Since -I
+# directories are searched before the system ones, <backtrace.h> finds this
+# library's header rather than a system-installed one.
+#
 lib{backtrace}:
 {
-  c.export.poptions = "-I$out_pfx" "-I$src_pfx"
+  c.export.poptions = "-I$out_root" "-I$src_root" "-I$out_pfx" "-I$src_pfx"
   c.export.libs = $intf_libs
+  c.pkgconfig.include = include/ include/libbacktrace/
 }
 
 #liba{backtrace}: c.export.poptions += -DLIBBACKTRACE_STATIC
@@ -34,10 +179,20 @@ if $version.pre_release
 else
   lib{backtrace}: bin.lib.version = "-$version.major.$version.minor"
 
-# Install recreating subdirectories.
+# Install into the libbacktrace/ subdirectory recreating subdirectories.
 #
 h{*}:
 {
-  install         = include/
+  install         = include/libbacktrace/
   install.subdirs = true
+}
+
+# Private headers: not part of the public API, not installed.
+#
+h{internal.h}@./:  install = false
+h{filenames.h}@./: install = false
+
+config/
+{
+  h{*}: install = false
 }
