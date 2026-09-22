@@ -1,73 +1,55 @@
-#include <stdio.h>
-#include <errno.h>
-#include <string.h>
-
 #include <backtrace.h>
+#include <backtrace-supported.h>
 
 #undef NDEBUG
 #include <assert.h>
+#include <stddef.h>
 
-#ifdef _WIN32
-#define tmpfile mytmpfile
-static FILE *mytmpfile ();
-#endif
+static int simple_count;
 
-int main ()
+static int
+simple_callback (void *data, uintptr_t pc)
 {
-  char b[256];
+  (void) data;
+  (void) pc;
 
-  /* Basics.
-   */
-  {
-    FILE *o = tmpfile ();
-    assert (say_hello (o, "World") > 0);
-    rewind (o);
-    assert (fread (b, 1, sizeof (b), o) == 14 &&
-            strncmp (b, "Hello, World!\n", 14) == 0);
-    fclose (o);
-  }
-
-  /* Empty name.
-   */
-  {
-    FILE *o = tmpfile ();
-    assert (say_hello (o, "") < 0 && errno == EINVAL);
-    fclose (o);
-  }
+  ++simple_count;
 
   return 0;
 }
 
-#ifdef _WIN32
-#include <windows.h>
-#include <fcntl.h>
-#include <io.h>
-
-FILE *mytmpfile ()
+static void
+error_callback (void *data, const char *msg, int errnum)
 {
-  char d[MAX_PATH + 1], p[MAX_PATH + 1];
-  if (GetTempPathA (sizeof (d), d) == 0 ||
-      GetTempFileNameA (d, "tmp", 0, p) == 0)
-    return NULL;
-
-  HANDLE h = CreateFileA (p,
-                          GENERIC_READ | GENERIC_WRITE,
-                          0,
-                          NULL,
-                          CREATE_ALWAYS,
-                          FILE_ATTRIBUTE_TEMPORARY | FILE_FLAG_DELETE_ON_CLOSE,
-                          NULL);
-  if (h == INVALID_HANDLE_VALUE)
-    return NULL;
-
-  int fd = _open_osfhandle ((intptr_t) h, _O_RDWR);
-  if (fd == -1)
-    return NULL;
-
-  FILE *f = _fdopen (fd, "wb+");
-  if (f == NULL)
-    _close (fd);
-
-  return f;
+  (void) data;
+  (void) msg;
+  (void) errnum;
 }
-#endif
+
+int
+main (void)
+{
+  struct backtrace_state *state;
+
+  /* Exercise backtrace-supported.h: the macros must be defined and, per
+     their own documentation, hold either 0 or 1.  */
+  assert (BACKTRACE_SUPPORTED == 0 || BACKTRACE_SUPPORTED == 1);
+  assert (BACKTRACE_USES_MALLOC == 0 || BACKTRACE_USES_MALLOC == 1);
+  assert (BACKTRACE_SUPPORTS_THREADS == 0 || BACKTRACE_SUPPORTS_THREADS == 1);
+  assert (BACKTRACE_SUPPORTS_DATA == 0 || BACKTRACE_SUPPORTS_DATA == 1);
+
+  state = backtrace_create_state (NULL, 0, error_callback, NULL);
+  assert (state != NULL);
+
+  /* backtrace_simple() only needs the unwinder to find this frame, unlike
+     backtrace_full()/backtrace_print(), whose symbolic (file/line)
+     resolution additionally requires the calling binary to carry debug
+     info, which is outside this library's control.
+     This keeps the smoke test independent of how the test binary itself
+     happens to be compiled.  */
+  simple_count = 0;
+  backtrace_simple (state, 0, simple_callback, error_callback, NULL);
+  assert (simple_count > 0);
+
+  return 0;
+}
