@@ -1,13 +1,16 @@
 : 1
 name: libbacktrace
-version: 0.1.0-a.0.z
+version: 1.0.0-a.0.z
 language: c
-summary: A C library that may be linked into a C/C++ program to produce symbolic backtraces
-license: other: proprietary ; Not free/open source.
+project: libbacktrace
+summary: C library for producing symbolic backtraces with debug info
+license: BSD-3-Clause
+topics: debugging, stack trace, DWARF, symbolization
+keywords: stacktrace dwarf elf unwind symbols
 description-file: README.md
 package-description-file: PACKAGE-README.md
-url: https://example.org/upstream
-email: upstream@example.org
+url: https://github.com/ianlancetaylor/libbacktrace
+email: iant@golang.org
 package-url: https://github.com/build2-packaging/libbacktrace
 package-email: packaging@build2.org ; Mailing list.
 depends: * build2 >= 0.18.0
