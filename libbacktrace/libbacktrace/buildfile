@@ -1,0 +1,43 @@
+intf_libs = # Interface dependencies.
+impl_libs = # Implementation dependencies.
+#import xxxx_libs += libhello%lib{hello}
+
+lib{backtrace}: {h c}{**} $impl_libs $intf_libs
+
+# Build options.
+#
+out_pfx = [dir_path] $out_root/libbacktrace/
+src_pfx = [dir_path] $src_root/libbacktrace/
+
+c.poptions =+ "-I$out_pfx" "-I$src_pfx"
+
+#obja{*}: c.poptions += -DLIBBACKTRACE_STATIC_BUILD
+#objs{*}: c.poptions += -DLIBBACKTRACE_SHARED_BUILD
+
+# Export options.
+#
+lib{backtrace}:
+{
+  c.export.poptions = "-I$out_pfx" "-I$src_pfx"
+  c.export.libs = $intf_libs
+}
+
+#liba{backtrace}: c.export.poptions += -DLIBBACKTRACE_STATIC
+#libs{backtrace}: c.export.poptions += -DLIBBACKTRACE_SHARED
+
+# For pre-releases use the complete version to make sure they cannot
+# be used in place of another pre-release or the final version. See
+# the version module for details on the version.* variable values.
+#
+if $version.pre_release
+  lib{backtrace}: bin.lib.version = "-$version.project_id"
+else
+  lib{backtrace}: bin.lib.version = "-$version.major.$version.minor"
+
+# Install recreating subdirectories.
+#
+h{*}:
+{
+  install         = include/
+  install.subdirs = true
+}
