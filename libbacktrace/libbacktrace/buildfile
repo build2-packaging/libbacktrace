@@ -21,6 +21,14 @@ have_unwind = $gcc_or_clang
 # mmap-based file views and allocation are used on all POSIX targets.
 # Windows falls back to read()/malloc() (matches upstream's mmap check).
 #
+# Simplification: upstream's configure.ac actually probes VIEW_FILE (needs
+# mmap()/sys/mman.h) and ALLOC_FILE (additionally needs MAP_ANONYMOUS/
+# MAP_ANON) separately, so in principle a platform could have one without
+# the other. Linux, macOS, and the BSDs have both, so collapsing them into
+# one $have_mmap here does not misbuild on any of them. A non-Windows
+# platform with mmap() but no anonymous mapping would need this split back
+# into two checks.
+#
 have_mmap = (!$target_windows)
 
 lib{backtrace}: h{** -backtrace-supported -config/config} \
