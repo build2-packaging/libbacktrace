@@ -12,7 +12,8 @@ information.
 
 Upstream does not tag releases (its `README.md` calls it version 1.0), so
 this package uses `1.0.Z` versions, each pinned to an upstream commit. This
-package does not support AIX/XCOFF.
+package does not support AIX/XCOFF, and on Windows it only supports MinGW
+GCC (not MSVC or Clang).
 
 
 ## Usage
