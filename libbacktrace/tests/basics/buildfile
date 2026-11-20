@@ -1,3 +1,157 @@
 import libs = libbacktrace%lib{backtrace}
 
-exe{driver}: {h c}{**} $libs testscript{**}
+target_macos = ($c.target.class == 'macos')
+target_elf   = ($c.target.class == 'linux' || $c.target.class == 'bsd')
+
+# Upstream's test programs from Makefile.am that link the library itself.
+#
+./: exe{stest unittest}
+
+# These tests check the file names and line numbers that libbacktrace
+# resolves from debug information. On macOS it reads that only from a .dSYM
+# bundle next to the executable, which upstream creates with dsymutil after
+# linking. Since the bundle is made from the executable, each test is an
+# alias that runs the executable once it and, on macOS, its dSYM file are up
+# to date.
+#
+# The dSYM file (Mach-O companion file with only debug sections) is inside
+# the bundle, named after the executable without an extension.
+#
+define dsym: file
+dsym{*}: extension = ''
+
+for n: btest edtest mdtest mtest ttest
+{
+  d = $(n).dSYM
+
+  ./: alias{$n}
+
+  alias{$n}: exe{$n}
+  alias{$n}: dsym{$d/Contents/Resources/DWARF/$n}: include = $target_macos
+
+  alias{$n}: test = exe{$n}
+  exe{$n}:   test = false
+
+  # In-source builds only create the directories that are listed explicitly
+  # as fsdir{} prerequisites.
+  #
+  dsym{$d/Contents/Resources/DWARF/$n}: fsdir{$d/Contents/Resources/DWARF/}: \
+    include = adhoc
+
+  fsdir{$d/Contents/Resources/DWARF/}: fsdir{$d/Contents/Resources/}
+  fsdir{$d/Contents/Resources/}:       fsdir{$d/Contents/}
+  fsdir{$d/Contents/}:                 fsdir{$d/}
+
+  dsym{$d/Contents/Resources/DWARF/$n}: exe{$n}
+  {
+    bundle = [dir_path] $out_base/$d
+  }
+  % update
+  {{
+    diag dsymutil ($<[0])
+    dsymutil -o $bundle $path($<[0])
+  }}
+  % clean
+  {{
+    rm -r -f $bundle
+  }}
+}
+
+# The decompression tests call into elf.c, which only ELF targets build.
+#
+./: exe{xztest zstdtest ztest}: include = $target_elf
+
+exe{btest}:    c{btest}                libue{testlib}
+exe{edtest}:   c{edtest edtest2_build} libue{testlib}
+exe{mdtest}:   c{mdtest}               libue{testlib}
+exe{mtest}:    c{mtest}                libue{testlib}
+exe{stest}:    c{stest}                $libs
+exe{ttest}:    c{ttest}                libue{testlib}
+exe{unittest}: c{unittest}             libue{testlib}
+exe{xztest}:   c{xztest}               libue{testlib}
+exe{zstdtest}: c{zstdtest}             libue{testlib}
+exe{ztest}:    c{ztest}                libue{testlib}
+
+# edtest expects f2() to resolve to edtest2_build.c. Generate it as a copy
+# of edtest2.c, as upstream does, so the debug information records that
+# name even where the compiler sees symlinks resolved to their target.
+#
+c{edtest2_build}: c{edtest2}
+{{
+  cp $path($<) $path($>)
+}}
+
+libue{testlib}: {h c}{testlib} h{filenames} $libs
+
+# Private library headers some of the tests include.
+#
+exe{edtest mdtest stest unittest xztest zstdtest ztest}: h{internal config}
+
+# Generate config.h from upstream's autoheader template, configured the same
+# way as the library's (see its buildfile for details).
+#
+using autoconf
+
+large_files = ($c.stdlib == 'glibc' || $c.target.system == 'mingw32')
+
+h{config}: in{config}
+{
+  autoconf.aliases  = HAVE_DECL_GETPAGESIZE@HAVE_GETPAGESIZE \
+                      HAVE_DECL_STRNLEN@HAVE_STRNLEN         \
+                      HAVE_DECL__PGMPTR@HAVE__PGMPTR         \
+                      HAVE_GETIPINFO@HAVE__UNWIND_GETIPINFO
+  autoconf.aliases += HAVE_ATOMIC_FUNCTIONS@HAVE_LIBBACKTRACE_ATOMIC_FUNCTIONS \
+                      HAVE_SYNC_FUNCTIONS@HAVE_LIBBACKTRACE_SYNC_FUNCTIONS     \
+                      HAVE_KERN_PROC@HAVE_LIBBACKTRACE_KERN_PROC               \
+                      HAVE_KERN_PROC_ARGS@HAVE_LIBBACKTRACE_KERN_PROC_ARGS
+
+  autoconf.substitutions  = _ALL_SOURCE@true _GNU_SOURCE@true \
+                            _POSIX_PTHREAD_SEMANTICS@true     \
+                            _TANDEM_SOURCE@true __EXTENSIONS__@true
+  autoconf.substitutions += _MINIX@false _POSIX_1_SOURCE@false \
+                            _POSIX_SOURCE@false
+  autoconf.substitutions += _FILE_OFFSET_BITS@($large_files ? 64 : false) \
+                            _LARGE_FILES@false
+
+  HAVE_LIBLZMA = false
+  HAVE_ZLIB    = false
+  HAVE_ZSTD    = false
+
+  LT_OBJDIR         = false
+  PACKAGE_BUGREPORT = false
+  PACKAGE_NAME      = false
+  PACKAGE_STRING    = false
+  PACKAGE_TARNAME   = false
+  PACKAGE_URL       = false
+  PACKAGE_VERSION   = false
+}
+
+# The generated config.h is in the output directory.
+#
+c.poptions =+ "-I$out_base" "-I$src_base"
+
+c.poptions += -D_GNU_SOURCE
+
+if $large_files
+  c.poptions += -D_FILE_OFFSET_BITS=64
+
+# Upstream compiles its tests with debug information and unwind tables
+# since they check the file names, line numbers, and function names that
+# libbacktrace resolves for their own frames.
+#
+c.coptions += -g -funwind-tables
+
+# The tests use both GCC's noclone and Clang's optnone function attributes,
+# each of which the other compiler ignores with a warning.
+#
+if ($c.id == 'gcc')
+  c.coptions += -Wno-attributes
+elif ($c.id.type == 'clang')
+  c.coptions += -Wno-unknown-attributes
+
+# Optimization level upstream uses for these tests.
+#
+obje{btest mdtest mtest}: c.coptions += -O
+
+if ($c.target.system != 'win32-msvc')
+  exe{ttest}: c.libs += -pthread

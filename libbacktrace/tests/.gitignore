@@ -1,6 +1,26 @@
 # Test executables.
 #
-driver
+btest
+ctesta/ctesta
+ctestg/ctestg
+edtest
+mdtest
+mtest
+stest
+ttest
+unittest
+xztest
+zstdtest
+ztest
+
+# Generated sources.
+#
+basics/config.h
+basics/edtest2_build.c
+
+# Debug information bundles (macOS).
+#
+*.dSYM/
 
 # Testscript output directories (can be symlinks).
 #

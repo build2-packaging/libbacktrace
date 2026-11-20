@@ -1,0 +1,25 @@
+import libs = libbacktrace%lib{backtrace}
+
+# Upstream's btest linked with zlib-gnu compressed debug sections, which
+# libbacktrace decompresses itself. The zlib-gnu format is a GNU ld option,
+# the linker on Linux targets.
+#
+./: exe{ctestg}: include = ($c.target.class == 'linux')
+
+exe{ctestg}: c{btest} {h c}{testlib} h{filenames} $libs
+
+exe{ctestg}: c.loptions += -Wl,--compress-debug-sections=zlib-gnu
+
+# Upstream compiles its tests with debug information and unwind tables
+# since they check the file names, line numbers, and function names that
+# libbacktrace resolves for their own frames.
+#
+c.coptions += -g -funwind-tables
+
+# The test uses both GCC's noclone and Clang's optnone function attributes,
+# each of which the other compiler ignores with a warning.
+#
+if ($c.id == 'gcc')
+  c.coptions += -Wno-attributes
+elif ($c.id.type == 'clang')
+  c.coptions += -Wno-unknown-attributes
