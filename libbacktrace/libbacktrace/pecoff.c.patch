@@ -1,0 +1,41 @@
+--- pecoff.c.orig	2026-11-20 21:25:23.943520130 +0100
++++ pecoff.c	2026-11-21 15:24:28.095474479 +0100
+@@ -848,13 +848,19 @@
+   if (syms_num != 0)
+     {
+       struct coff_syminfo_data *sdata;
++      struct libbacktrace_base_address syminfo_base;
+ 
+       sdata = ((struct coff_syminfo_data *)
+ 	       backtrace_alloc (state, sizeof *sdata, error_callback, data));
+       if (sdata == NULL)
+ 	goto fail;
+ 
+-      if (!coff_initialize_syminfo (state, image_base, is_64,
++      syminfo_base = image_base;
++#ifdef HAVE_WINDOWS_H
++      if (module_handle != 0)
++	syminfo_base.m = module_handle;
++#endif
++      if (!coff_initialize_syminfo (state, syminfo_base, is_64,
+ 				    sects, sects_num,
+ 				    syms_view.data, syms_size,
+ 				    str_view.data, str_size,
+@@ -1121,6 +1127,8 @@
+     {
+       if (state->fileline_fn == NULL || state->fileline_fn == coff_nodebug)
+ 	*fileline_fn = coff_fileline_fn;
++      else
++	*fileline_fn = state->fileline_fn;
+     }
+   else
+     {
+@@ -1129,6 +1137,8 @@
+       current_fn = backtrace_atomic_load_pointer (&state->fileline_fn);
+       if (current_fn == NULL || current_fn == coff_nodebug)
+ 	*fileline_fn = coff_fileline_fn;
++      else
++	*fileline_fn = current_fn;
+     }
+ 
+   return 1;
