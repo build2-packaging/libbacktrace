@@ -1,6 +1,6 @@
 : 1
 name: libbacktrace
-version: 1.0.0-a.0.z
+version: 1.0.0
 language: c
 project: libbacktrace
 summary: C library for producing symbolic backtraces with debug info
