@@ -1,0 +1,7 @@
+: 1
+name: libbacktrace
+version: 1.0.0
+language: c
+project: libbacktrace
+summary: C library for producing symbolic backtraces with debug info
+license: BSD-3-Clause
